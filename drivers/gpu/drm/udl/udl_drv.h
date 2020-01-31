@@ -54,7 +54,6 @@ struct udl_fbdev;
 
 struct udl_device {
 	struct drm_device drm;
-	struct device *dev;
 	struct usb_device *udev;
 	struct drm_crtc *crtc;
 
