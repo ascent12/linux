@@ -14,24 +14,6 @@
 
 #include "udl_drv.h"
 
-static int udl_usb_suspend(struct usb_interface *interface,
-			   pm_message_t message)
-{
-	struct drm_device *dev = usb_get_intfdata(interface);
-
-	drm_kms_helper_poll_disable(dev);
-	return 0;
-}
-
-static int udl_usb_resume(struct usb_interface *interface)
-{
-	struct drm_device *dev = usb_get_intfdata(interface);
-
-	drm_kms_helper_poll_enable(dev);
-	udl_modeset_restore(dev);
-	return 0;
-}
-
 static const struct vm_operations_struct udl_gem_vm_ops = {
 	.fault = udl_gem_fault,
 	.open = drm_gem_vm_open,
@@ -145,6 +127,23 @@ static void udl_usb_disconnect(struct usb_interface *interface)
 	udl_drop_usb(dev);
 	drm_dev_unplug(dev);
 	drm_dev_put(dev);
+}
+
+static int udl_usb_suspend(struct usb_interface *interface,
+			   pm_message_t message)
+{
+	struct drm_device *dev = usb_get_intfdata(interface);
+
+	return drm_mode_config_helper_suspend(dev);
+}
+
+static int udl_usb_resume(struct usb_interface *interface)
+{
+	struct drm_device *dev = usb_get_intfdata(interface);
+
+	drm_mode_config_helper_resume(dev);
+
+	return 0;
 }
 
 /*
