@@ -70,9 +70,6 @@ int udl_handle_damage(struct drm_framebuffer *fb, int x, int y,
 	struct udl_device *udl = to_udl(dev);
 	int i, ret;
 	char *cmd;
-	cycles_t start_cycles, end_cycles;
-	int bytes_sent = 0;
-	int bytes_identical = 0;
 	struct urb *urb;
 	int aligned_x;
 	int log_bpp;
@@ -105,8 +102,6 @@ int udl_handle_damage(struct drm_framebuffer *fb, int x, int y,
 	    (y + height > fb->height))
 		return -EINVAL;
 
-	start_cycles = get_cycles();
-
 	urb = udl_get_urb(dev);
 	if (!urb)
 		return 0;
@@ -119,8 +114,7 @@ int udl_handle_damage(struct drm_framebuffer *fb, int x, int y,
 		if (udl_render_hline(dev, log_bpp, &urb,
 				     (char *) vaddr,
 				     &cmd, byte_offset, dev_byte_offset,
-				     width << log_bpp,
-				     &bytes_identical, &bytes_sent))
+				     width << log_bpp))
 			goto error;
 	}
 
@@ -131,7 +125,6 @@ int udl_handle_damage(struct drm_framebuffer *fb, int x, int y,
 			*cmd++ = 0xAF;
 		len = cmd - (char *) urb->transfer_buffer;
 		ret = udl_submit_urb(dev, urb, len);
-		bytes_sent += len;
 	} else {
 		udl_urb_completion(urb);
 	}
@@ -142,14 +135,6 @@ int udl_handle_damage(struct drm_framebuffer *fb, int x, int y,
 		if (ret)
 			DRM_ERROR("dma_buf_end_cpu_access err: %d\n", ret);
 	}
-
-	atomic_add(bytes_sent, &udl->bytes_sent);
-	atomic_add(bytes_identical, &udl->bytes_identical);
-	atomic_add((width * height) << log_bpp, &udl->bytes_rendered);
-	end_cycles = get_cycles();
-	atomic_add(((unsigned int) ((end_cycles - start_cycles)
-		    >> 10)), /* Kcycles */
-		   &udl->cpu_kcycles_used);
 
 error:
 	drm_gem_shmem_vunmap(fb->obj[0], vaddr);

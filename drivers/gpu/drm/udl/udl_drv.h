@@ -63,10 +63,6 @@ struct udl_device {
 
 	char mode_buf[1024];
 	uint32_t mode_buf_len;
-	atomic_t bytes_rendered; /* raw pixel-bytes driver asked to render */
-	atomic_t bytes_identical; /* saved effort with backbuffer comparison */
-	atomic_t bytes_sent; /* to usb, after compression including overhead */
-	atomic_t cpu_kcycles_used; /* transpired during pixel processing */
 };
 
 #define to_udl(x) container_of(x, struct udl_device, drm)
@@ -86,8 +82,7 @@ void udl_fini(struct drm_device *dev);
 
 int udl_render_hline(struct drm_device *dev, int log_bpp, struct urb **urb_ptr,
 		     const char *front, char **urb_buf_ptr,
-		     u32 byte_offset, u32 device_byte_offset, u32 byte_width,
-		     int *ident_ptr, int *sent_ptr);
+		     u32 byte_offset, u32 device_byte_offset, u32 byte_width);
 
 int udl_handle_damage(struct drm_framebuffer *fb, int x, int y,
 		      int width, int height);
