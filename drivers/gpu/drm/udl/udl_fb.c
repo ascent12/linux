@@ -91,9 +91,6 @@ int udl_handle_damage(struct udl_framebuffer *fb, int x, int y,
 	BUG_ON(!is_power_of_2(fb->base.format->cpp[0]));
 	log_bpp = __ffs(fb->base.format->cpp[0]);
 
-	if (!fb->active_16)
-		return 0;
-
 	if (!fb->obj->vmapping) {
 		ret = udl_gem_vmap(fb->obj);
 		if (ret == -ENOMEM) {
@@ -453,9 +450,6 @@ int udl_fbdev_init(struct drm_device *dev)
 	ret = drm_fb_helper_single_add_all_connectors(&ufbdev->helper);
 	if (ret)
 		goto fini;
-
-	/* disable all the possible outputs/crtcs before entering KMS mode */
-	drm_helper_disable_unused_functions(dev);
 
 	ret = drm_fb_helper_initial_config(&ufbdev->helper, bpp_sel);
 	if (ret)

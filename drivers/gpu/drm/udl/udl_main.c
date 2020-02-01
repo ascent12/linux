@@ -334,7 +334,7 @@ int udl_init(struct udl_device *udl)
 	}
 
 	DRM_DEBUG("\n");
-	ret = udl_modeset_init(dev);
+	ret = udl_modeset_init(udl);
 	if (ret)
 		goto err;
 

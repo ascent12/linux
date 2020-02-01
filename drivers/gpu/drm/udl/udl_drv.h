@@ -15,10 +15,11 @@
 #include <linux/usb.h>
 
 #include <drm/drm_device.h>
+#include <drm/drm_edid.h>
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_gem.h>
+#include <drm/drm_simple_kms_helper.h>
 
-struct drm_encoder;
 struct drm_mode_create_dumb;
 
 #define DRIVER_NAME		"udl"
@@ -55,7 +56,9 @@ struct udl_fbdev;
 struct udl_device {
 	struct drm_device drm;
 	struct usb_device *udev;
-	struct drm_crtc *crtc;
+	struct drm_simple_display_pipe pipe;
+	struct drm_connector conn;
+	struct edid *edid;
 
 	struct mutex gem_lock;
 
@@ -94,11 +97,9 @@ struct udl_framebuffer {
 #define to_udl_fb(x) container_of(x, struct udl_framebuffer, base)
 
 /* modeset */
-int udl_modeset_init(struct drm_device *dev);
+int udl_modeset_init(struct udl_device *udl);
 void udl_modeset_cleanup(struct drm_device *dev);
-int udl_connector_init(struct drm_device *dev, struct drm_encoder *encoder);
-
-struct drm_encoder *udl_encoder_init(struct drm_device *dev);
+int udl_connector_init(struct udl_device *udl);
 
 struct urb *udl_get_urb(struct drm_device *dev);
 
