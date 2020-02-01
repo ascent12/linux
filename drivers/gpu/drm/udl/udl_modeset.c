@@ -12,6 +12,7 @@
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_damage_helper.h>
+#include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/drm_modeset_helper_vtables.h>
 #include <drm/drm_vblank.h>
 
@@ -248,7 +249,7 @@ static int udl_crtc_write_mode_to_hw(struct drm_crtc *crtc)
 }
 
 static const struct drm_mode_config_funcs udl_mode_funcs = {
-	.fb_create = udl_fb_user_fb_create,
+	.fb_create = drm_gem_fb_create_with_dirty,
 	.atomic_check = drm_atomic_helper_check,
 	.atomic_commit = drm_atomic_helper_commit,
 };
@@ -258,7 +259,7 @@ static void udl_pipe_enable(struct drm_simple_display_pipe *pipe,
 			    struct drm_plane_state *plane_state)
 {
 	struct udl_device *udl = pipe->crtc.dev->dev_private;
-	struct udl_framebuffer *ufb = to_udl_fb(plane_state->fb);
+	struct drm_framebuffer *fb = plane_state->fb;
 	struct drm_display_mode *mode = &crtc_state->mode;
 	char *buf;
 	char *wrptr;
@@ -290,7 +291,7 @@ static void udl_pipe_enable(struct drm_simple_display_pipe *pipe,
 	udl->mode_buf_len = wrptr - buf;
 
 	/* damage all of it */
-	udl_handle_damage(ufb, 0, 0, ufb->base.width, ufb->base.height);
+	udl_handle_damage(fb, 0, 0, fb->width, fb->height);
 
 	udl_crtc_write_mode_to_hw(&pipe->crtc);
 }
@@ -326,19 +327,23 @@ static void udl_pipe_update(struct drm_simple_display_pipe *pipe,
 			    struct drm_plane_state *old_state)
 {
 	struct drm_plane_state *state = pipe->plane.state;
+	struct drm_atomic_helper_damage_iter iter;
 	struct drm_rect rect;
 
-	if (drm_atomic_helper_damage_merged(old_state, state, &rect))
-		udl_handle_damage(to_udl_fb(pipe->plane.state->fb),
+	drm_atomic_helper_damage_iter_init(&iter, old_state, state);
+
+	drm_atomic_for_each_plane_damage(&iter, &rect)
+		udl_handle_damage(state->fb,
 				  rect.x1, rect.y1,
 				  rect.x2 - rect.x1, rect.y2 - rect.y1);
 }
 
 static const struct drm_simple_display_pipe_funcs udl_pipe_funcs = {
-	.enable	 = udl_pipe_enable,
+	.enable	= udl_pipe_enable,
 	.disable = udl_pipe_disable,
-	.check   = udl_pipe_check,
-	.update	 = udl_pipe_update,
+	.check = udl_pipe_check,
+	.update	= udl_pipe_update,
+	.prepare_fb = drm_gem_fb_simple_display_pipe_prepare_fb,
 };
 
 static const uint32_t udl_pipe_formats[] = {
@@ -381,6 +386,8 @@ int udl_modeset_init(struct udl_device *udl)
 					   &udl->conn);
 	if (ret)
 		return ret;
+
+	drm_plane_enable_fb_damage_clips(&udl->pipe.plane);
 
 	drm_mode_config_reset(dev);
 

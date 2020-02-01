@@ -15,6 +15,7 @@
 #include <drm/drm_drv.h>
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_fourcc.h>
+#include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_modeset_helper.h>
 
 #include "udl_drv.h"
@@ -62,10 +63,10 @@ static uint16_t rgb16(uint32_t col)
 }
 #endif
 
-int udl_handle_damage(struct udl_framebuffer *fb, int x, int y,
+int udl_handle_damage(struct drm_framebuffer *fb, int x, int y,
 		      int width, int height)
 {
-	struct drm_device *dev = fb->base.dev;
+	struct drm_device *dev = fb->dev;
 	struct udl_device *udl = to_udl(dev);
 	int i, ret;
 	char *cmd;
@@ -75,19 +76,23 @@ int udl_handle_damage(struct udl_framebuffer *fb, int x, int y,
 	struct urb *urb;
 	int aligned_x;
 	int log_bpp;
+	void *vaddr;
 
-	BUG_ON(!is_power_of_2(fb->base.format->cpp[0]));
-	log_bpp = __ffs(fb->base.format->cpp[0]);
+	BUG_ON(!is_power_of_2(fb->format->cpp[0]));
+	log_bpp = __ffs(fb->format->cpp[0]);
 
-	if (!fb->obj->vmapping) {
-		ret = udl_gem_vmap(fb->obj);
-		if (ret == -ENOMEM) {
-			DRM_ERROR("failed to vmap fb\n");
-			return 0;
-		}
-		if (!fb->obj->vmapping) {
-			DRM_ERROR("failed to vmapping\n");
-			return 0;
+	vaddr = drm_gem_shmem_vmap(fb->obj[0]);
+	if (IS_ERR(vaddr)) {
+		DRM_ERROR("failed to vmap fb: %ld\n", PTR_ERR(vaddr));
+		return PTR_ERR(vaddr);
+	}
+
+	if (fb->obj[0]->import_attach) {
+		ret = dma_buf_begin_cpu_access(
+			fb->obj[0]->import_attach->dmabuf, DMA_FROM_DEVICE);
+		if (ret) {
+			DRM_ERROR("dma_buf_begin_cpu_access err: %d\n", ret);
+			goto error;
 		}
 	}
 
@@ -96,8 +101,8 @@ int udl_handle_damage(struct udl_framebuffer *fb, int x, int y,
 	x = aligned_x;
 
 	if ((width <= 0) ||
-	    (x + width > fb->base.width) ||
-	    (y + height > fb->base.height))
+	    (x + width > fb->width) ||
+	    (y + height > fb->height))
 		return -EINVAL;
 
 	start_cycles = get_cycles();
@@ -108,11 +113,11 @@ int udl_handle_damage(struct udl_framebuffer *fb, int x, int y,
 	cmd = urb->transfer_buffer;
 
 	for (i = y; i < y + height ; i++) {
-		const int line_offset = fb->base.pitches[0] * i;
+		const int line_offset = fb->pitches[0] * i;
 		const int byte_offset = line_offset + (x << log_bpp);
-		const int dev_byte_offset = (fb->base.width * i + x) << log_bpp;
+		const int dev_byte_offset = (fb->width * i + x) << log_bpp;
 		if (udl_render_hline(dev, log_bpp, &urb,
-				     (char *) fb->obj->vmapping,
+				     (char *) vaddr,
 				     &cmd, byte_offset, dev_byte_offset,
 				     width << log_bpp,
 				     &bytes_identical, &bytes_sent))
@@ -127,10 +132,17 @@ int udl_handle_damage(struct udl_framebuffer *fb, int x, int y,
 		len = cmd - (char *) urb->transfer_buffer;
 		ret = udl_submit_urb(dev, urb, len);
 		bytes_sent += len;
-	} else
+	} else {
 		udl_urb_completion(urb);
+	}
 
-error:
+	if (fb->obj[0]->import_attach) {
+		ret = dma_buf_end_cpu_access(fb->obj[0]->import_attach->dmabuf,
+					     DMA_FROM_DEVICE);
+		if (ret)
+			DRM_ERROR("dma_buf_end_cpu_access err: %d\n", ret);
+	}
+
 	atomic_add(bytes_sent, &udl->bytes_sent);
 	atomic_add(bytes_identical, &udl->bytes_identical);
 	atomic_add((width * height) << log_bpp, &udl->bytes_rendered);
@@ -139,110 +151,8 @@ error:
 		    >> 10)), /* Kcycles */
 		   &udl->cpu_kcycles_used);
 
+error:
+	drm_gem_shmem_vunmap(fb->obj[0], vaddr);
+
 	return 0;
-}
-
-static int udl_user_framebuffer_dirty(struct drm_framebuffer *fb,
-				      struct drm_file *file,
-				      unsigned flags, unsigned color,
-				      struct drm_clip_rect *clips,
-				      unsigned num_clips)
-{
-	struct udl_framebuffer *ufb = to_udl_fb(fb);
-	int i;
-	int ret = 0;
-
-	drm_modeset_lock_all(fb->dev);
-
-	if (!ufb->active_16)
-		goto unlock;
-
-	if (ufb->obj->base.import_attach) {
-		ret = dma_buf_begin_cpu_access(ufb->obj->base.import_attach->dmabuf,
-					       DMA_FROM_DEVICE);
-		if (ret)
-			goto unlock;
-	}
-
-	for (i = 0; i < num_clips; i++) {
-		ret = udl_handle_damage(ufb, clips[i].x1, clips[i].y1,
-				  clips[i].x2 - clips[i].x1,
-				  clips[i].y2 - clips[i].y1);
-		if (ret)
-			break;
-	}
-
-	if (ufb->obj->base.import_attach) {
-		ret = dma_buf_end_cpu_access(ufb->obj->base.import_attach->dmabuf,
-					     DMA_FROM_DEVICE);
-	}
-
- unlock:
-	drm_modeset_unlock_all(fb->dev);
-
-	return ret;
-}
-
-static void udl_user_framebuffer_destroy(struct drm_framebuffer *fb)
-{
-	struct udl_framebuffer *ufb = to_udl_fb(fb);
-
-	if (ufb->obj)
-		drm_gem_object_put_unlocked(&ufb->obj->base);
-
-	drm_framebuffer_cleanup(fb);
-	kfree(ufb);
-}
-
-static const struct drm_framebuffer_funcs udlfb_funcs = {
-	.destroy = udl_user_framebuffer_destroy,
-	.dirty = udl_user_framebuffer_dirty,
-};
-
-static int
-udl_framebuffer_init(struct drm_device *dev,
-		     struct udl_framebuffer *ufb,
-		     const struct drm_mode_fb_cmd2 *mode_cmd,
-		     struct udl_gem_object *obj)
-{
-	int ret;
-
-	ufb->obj = obj;
-	drm_helper_mode_fill_fb_struct(dev, &ufb->base, mode_cmd);
-	ret = drm_framebuffer_init(dev, &ufb->base, &udlfb_funcs);
-	return ret;
-}
-
-struct drm_framebuffer *
-udl_fb_user_fb_create(struct drm_device *dev,
-		   struct drm_file *file,
-		   const struct drm_mode_fb_cmd2 *mode_cmd)
-{
-	struct drm_gem_object *obj;
-	struct udl_framebuffer *ufb;
-	int ret;
-	uint32_t size;
-
-	obj = drm_gem_object_lookup(file, mode_cmd->handles[0]);
-	if (obj == NULL)
-		return ERR_PTR(-ENOENT);
-
-	size = mode_cmd->pitches[0] * mode_cmd->height;
-	size = ALIGN(size, PAGE_SIZE);
-
-	if (size > obj->size) {
-		DRM_ERROR("object size not sufficient for fb %d %zu %d %d\n", size, obj->size, mode_cmd->pitches[0], mode_cmd->height);
-		return ERR_PTR(-ENOMEM);
-	}
-
-	ufb = kzalloc(sizeof(*ufb), GFP_KERNEL);
-	if (ufb == NULL)
-		return ERR_PTR(-ENOMEM);
-
-	ret = udl_framebuffer_init(dev, ufb, mode_cmd, to_udl_bo(obj));
-	if (ret) {
-		kfree(ufb);
-		return ERR_PTR(-EINVAL);
-	}
-	return &ufb->base;
 }

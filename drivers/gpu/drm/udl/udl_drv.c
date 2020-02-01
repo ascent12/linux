@@ -8,6 +8,7 @@
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_file.h>
+#include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_ioctl.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_print.h>
@@ -15,23 +16,7 @@
 
 #include "udl_drv.h"
 
-static const struct vm_operations_struct udl_gem_vm_ops = {
-	.fault = udl_gem_fault,
-	.open = drm_gem_vm_open,
-	.close = drm_gem_vm_close,
-};
-
-static const struct file_operations udl_driver_fops = {
-	.owner = THIS_MODULE,
-	.open = drm_open,
-	.mmap = udl_drm_gem_mmap,
-	.poll = drm_poll,
-	.read = drm_read,
-	.unlocked_ioctl	= drm_ioctl,
-	.release = drm_release,
-	.compat_ioctl = drm_compat_ioctl,
-	.llseek = noop_llseek,
-};
+DEFINE_DRM_GEM_FOPS(udl_fops);
 
 static void udl_driver_release(struct drm_device *dev)
 {
@@ -43,20 +28,9 @@ static void udl_driver_release(struct drm_device *dev)
 
 static struct drm_driver driver = {
 	.driver_features = DRIVER_MODESET | DRIVER_GEM,
+
 	.release = udl_driver_release,
-
-	/* gem hooks */
-	.gem_free_object_unlocked = udl_gem_free_object,
-	.gem_vm_ops = &udl_gem_vm_ops,
-
-	.dumb_create = udl_dumb_create,
-	.dumb_map_offset = udl_gem_mmap,
-	.fops = &udl_driver_fops,
-
-	.prime_handle_to_fd = drm_gem_prime_handle_to_fd,
-	.prime_fd_to_handle = drm_gem_prime_fd_to_handle,
-	.gem_prime_export = udl_gem_prime_export,
-	.gem_prime_import = udl_gem_prime_import,
+	.fops = &udl_fops,
 
 	.name = DRIVER_NAME,
 	.desc = DRIVER_DESC,
@@ -64,6 +38,8 @@ static struct drm_driver driver = {
 	.major = DRIVER_MAJOR,
 	.minor = DRIVER_MINOR,
 	.patchlevel = DRIVER_PATCHLEVEL,
+
+	DRM_GEM_SHMEM_DRIVER_OPS,
 };
 
 static struct udl_device *udl_driver_create(struct usb_interface *interface)

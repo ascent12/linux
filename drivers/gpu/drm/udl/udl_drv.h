@@ -17,10 +17,8 @@
 #include <drm/drm_device.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_framebuffer.h>
-#include <drm/drm_gem.h>
+#include <drm/drm_print.h>
 #include <drm/drm_simple_kms_helper.h>
-
-struct drm_mode_create_dumb;
 
 #define DRIVER_NAME		"udl"
 #define DRIVER_DESC		"DisplayLink"
@@ -58,8 +56,6 @@ struct udl_device {
 	struct drm_connector conn;
 	struct edid *edid;
 
-	struct mutex gem_lock;
-
 	int sku_pixel_limit;
 
 	struct urb_list urbs;
@@ -75,24 +71,6 @@ struct udl_device {
 
 #define to_udl(x) container_of(x, struct udl_device, drm)
 
-struct udl_gem_object {
-	struct drm_gem_object base;
-	struct page **pages;
-	void *vmapping;
-	struct sg_table *sg;
-	unsigned int flags;
-};
-
-#define to_udl_bo(x) container_of(x, struct udl_gem_object, base)
-
-struct udl_framebuffer {
-	struct drm_framebuffer base;
-	struct udl_gem_object *obj;
-	bool active_16; /* active on the 16-bit channel */
-};
-
-#define to_udl_fb(x) container_of(x, struct udl_framebuffer, base)
-
 /* modeset */
 int udl_modeset_init(struct udl_device *udl);
 void udl_modeset_cleanup(struct drm_device *dev);
@@ -106,37 +84,12 @@ void udl_urb_completion(struct urb *urb);
 int udl_init(struct udl_device *udl);
 void udl_fini(struct drm_device *dev);
 
-struct drm_framebuffer *
-udl_fb_user_fb_create(struct drm_device *dev,
-		      struct drm_file *file,
-		      const struct drm_mode_fb_cmd2 *mode_cmd);
-
 int udl_render_hline(struct drm_device *dev, int log_bpp, struct urb **urb_ptr,
 		     const char *front, char **urb_buf_ptr,
 		     u32 byte_offset, u32 device_byte_offset, u32 byte_width,
 		     int *ident_ptr, int *sent_ptr);
 
-int udl_dumb_create(struct drm_file *file_priv,
-		    struct drm_device *dev,
-		    struct drm_mode_create_dumb *args);
-int udl_gem_mmap(struct drm_file *file_priv, struct drm_device *dev,
-		 uint32_t handle, uint64_t *offset);
-
-void udl_gem_free_object(struct drm_gem_object *gem_obj);
-struct udl_gem_object *udl_gem_alloc_object(struct drm_device *dev,
-					    size_t size);
-struct dma_buf *udl_gem_prime_export(struct drm_gem_object *obj, int flags);
-struct drm_gem_object *udl_gem_prime_import(struct drm_device *dev,
-				struct dma_buf *dma_buf);
-
-int udl_gem_get_pages(struct udl_gem_object *obj);
-void udl_gem_put_pages(struct udl_gem_object *obj);
-int udl_gem_vmap(struct udl_gem_object *obj);
-void udl_gem_vunmap(struct udl_gem_object *obj);
-int udl_drm_gem_mmap(struct file *filp, struct vm_area_struct *vma);
-vm_fault_t udl_gem_fault(struct vm_fault *vmf);
-
-int udl_handle_damage(struct udl_framebuffer *fb, int x, int y,
+int udl_handle_damage(struct drm_framebuffer *fb, int x, int y,
 		      int width, int height);
 
 int udl_drop_usb(struct drm_device *dev);
