@@ -20,7 +20,8 @@ DEFINE_DRM_GEM_FOPS(udl_fops);
 
 static void udl_driver_release(struct drm_device *dev)
 {
-	udl_fini(dev);
+	drm_kms_helper_poll_fini(dev);
+	udl_usb_fini(dev);
 	udl_modeset_cleanup(dev);
 	drm_dev_fini(dev);
 	kfree(dev);
@@ -46,30 +47,37 @@ static struct udl_device *udl_driver_create(struct usb_interface *interface)
 {
 	struct usb_device *udev = interface_to_usbdev(interface);
 	struct udl_device *udl;
-	int r;
+	int ret;
 
 	udl = kzalloc(sizeof(*udl), GFP_KERNEL);
 	if (!udl)
 		return ERR_PTR(-ENOMEM);
 
-	r = drm_dev_init(&udl->drm, &driver, &interface->dev);
-	if (r) {
-		kfree(udl);
-		return ERR_PTR(r);
-	}
+	ret = drm_dev_init(&udl->drm, &driver, &interface->dev);
+	if (ret)
+		goto err_free;
 
 	udl->udev = udev;
 	udl->drm.dev_private = udl;
 
-	r = udl_init(udl);
-	if (r) {
-		drm_dev_fini(&udl->drm);
-		kfree(udl);
-		return ERR_PTR(r);
-	}
+	ret = udl_modeset_init(udl);
+	if (ret)
+		goto err_dev;
+
+	drm_kms_helper_poll_init(&udl->drm);
+
+	ret = udl_usb_init(udl);
+	if (ret)
+		goto err_dev;
 
 	usb_set_intfdata(interface, udl);
 	return udl;
+
+err_dev:
+	drm_dev_fini(&udl->drm);
+err_free:
+	kfree(udl);
+	return ERR_PTR(ret);
 }
 
 static int udl_usb_probe(struct usb_interface *interface,

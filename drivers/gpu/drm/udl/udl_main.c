@@ -310,7 +310,7 @@ int udl_submit_urb(struct drm_device *dev, struct urb *urb, size_t len)
 	return ret;
 }
 
-int udl_init(struct udl_device *udl)
+int udl_usb_init(struct udl_device *udl)
 {
 	struct drm_device *dev = &udl->drm;
 	int ret = -ENOMEM;
@@ -332,12 +332,6 @@ int udl_init(struct udl_device *udl)
 	}
 
 	DRM_DEBUG("\n");
-	ret = udl_modeset_init(udl);
-	if (ret)
-		goto err;
-
-	drm_kms_helper_poll_init(dev);
-
 	return 0;
 
 err:
@@ -353,11 +347,9 @@ int udl_drop_usb(struct drm_device *dev)
 	return 0;
 }
 
-void udl_fini(struct drm_device *dev)
+void udl_usb_fini(struct drm_device *dev)
 {
 	struct udl_device *udl = to_udl(dev);
-
-	drm_kms_helper_poll_fini(dev);
 
 	if (udl->urbs.count)
 		udl_free_urb_list(dev);
