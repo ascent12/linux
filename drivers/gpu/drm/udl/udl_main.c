@@ -341,12 +341,6 @@ err:
 	return ret;
 }
 
-int udl_drop_usb(struct drm_device *dev)
-{
-	udl_free_urb_list(dev);
-	return 0;
-}
-
 void udl_usb_fini(struct drm_device *dev)
 {
 	struct udl_device *udl = to_udl(dev);

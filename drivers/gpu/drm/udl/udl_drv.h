@@ -82,8 +82,6 @@ int udl_render_hline(struct drm_device *dev, int log_bpp, struct urb **urb_ptr,
 int udl_handle_damage(struct drm_framebuffer *fb, int x, int y,
 		      int width, int height);
 
-int udl_drop_usb(struct drm_device *dev);
-
 #define CMD_WRITE_RAW8   "\xAF\x60" /**< 8 bit raw write command. */
 #define CMD_WRITE_RL8    "\xAF\x61" /**< 8 bit run length command. */
 #define CMD_WRITE_COPY8  "\xAF\x62" /**< 8 bit copy command. */

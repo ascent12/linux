@@ -233,7 +233,7 @@ static char *udl_dummy_render(char *wrptr)
 static int udl_crtc_write_mode_to_hw(struct drm_crtc *crtc)
 {
 	struct drm_device *dev = crtc->dev;
-	struct udl_device *udl = dev->dev_private;
+	struct udl_device *udl = to_udl(dev);
 	struct urb *urb;
 	char *buf;
 	int retval;
@@ -260,7 +260,7 @@ static void udl_pipe_enable(struct drm_simple_display_pipe *pipe,
 			    struct drm_crtc_state *crtc_state,
 			    struct drm_plane_state *plane_state)
 {
-	struct udl_device *udl = pipe->crtc.dev->dev_private;
+	struct udl_device *udl = to_udl(pipe->crtc.dev);
 	struct drm_framebuffer *fb = plane_state->fb;
 	struct drm_display_mode *mode = &crtc_state->mode;
 	char *buf;
@@ -300,7 +300,7 @@ static void udl_pipe_enable(struct drm_simple_display_pipe *pipe,
 
 static void udl_pipe_disable(struct drm_simple_display_pipe *pipe)
 {
-	struct udl_device *udl = pipe->crtc.dev->dev_private;
+	struct udl_device *udl = to_udl(pipe->crtc.dev);
 	struct urb *urb;
 	char *buf;
 
@@ -379,7 +379,7 @@ static int udl_get_edid_block(void *data, u8 *buf, unsigned int block,
 
 static int udl_get_modes(struct drm_connector *connector)
 {
-	struct udl_device *udl = connector->dev->dev_private;
+	struct udl_device *udl = to_udl(connector->dev);
 
 	drm_connector_update_edid_property(connector, udl->edid);
 	if (udl->edid)
@@ -391,7 +391,7 @@ static int udl_connector_detect(struct drm_connector *connector,
 				struct drm_modeset_acquire_ctx *ctx,
 				bool force)
 {
-	struct udl_device *udl = connector->dev->dev_private;
+	struct udl_device *udl = to_udl(connector->dev);
 
 	/* cleanup previous edid */
 	if (udl->edid != NULL) {
@@ -409,7 +409,7 @@ static int udl_connector_detect(struct drm_connector *connector,
 static enum drm_mode_status udl_mode_valid(struct drm_connector *connector,
 			  struct drm_display_mode *mode)
 {
-	struct udl_device *udl = connector->dev->dev_private;
+	struct udl_device *udl = to_udl(connector->dev);
 	if (!udl->sku_pixel_limit)
 		return 0;
 
@@ -433,13 +433,6 @@ static const struct drm_connector_funcs udl_connector_funcs = {
 	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
 };
 
-static int udl_connector_init(struct udl_device *udl)
-{
-	drm_connector_helper_add(&udl->conn, &udl_connector_helper_funcs);
-	return drm_connector_init(&udl->drm, &udl->conn, &udl_connector_funcs,
-				  DRM_MODE_CONNECTOR_DVII);
-}
-
 static const uint32_t udl_pipe_formats[] = {
 	DRM_FORMAT_XRGB8888,
 };
@@ -449,62 +442,17 @@ static const uint64_t udl_pipe_modifiers[] = {
 	DRM_FORMAT_MOD_INVALID
 };
 
-static int udl_modeset_init(struct udl_device *udl)
-{
-	struct drm_device *dev = &udl->drm;
-	int ret;
-
-	drm_mode_config_init(dev);
-
-	dev->mode_config.min_width = 640;
-	dev->mode_config.min_height = 480;
-
-	dev->mode_config.max_width = 2048;
-	dev->mode_config.max_height = 2048;
-
-	dev->mode_config.prefer_shadow = 0;
-	dev->mode_config.preferred_depth = 24;
-
-	dev->mode_config.funcs = &udl_mode_funcs;
-
-	ret = udl_connector_init(udl);
-	if (ret)
-		return ret;
-
-	ret = drm_simple_display_pipe_init(dev,
-					   &udl->pipe,
-					   &udl_pipe_funcs,
-					   udl_pipe_formats,
-					   ARRAY_SIZE(udl_pipe_formats),
-					   udl_pipe_modifiers,
-					   &udl->conn);
-	if (ret)
-		return ret;
-
-	drm_plane_enable_fb_damage_clips(&udl->pipe.plane);
-
-	drm_mode_config_reset(dev);
-
-	return 0;
-}
-
-static void udl_modeset_cleanup(struct drm_device *dev)
-{
-	drm_mode_config_cleanup(dev);
-}
-
 DEFINE_DRM_GEM_FOPS(udl_fops);
 
 static void udl_driver_release(struct drm_device *dev)
 {
 	drm_kms_helper_poll_fini(dev);
-	udl_usb_fini(dev);
-	udl_modeset_cleanup(dev);
+	drm_mode_config_cleanup(dev);
 	drm_dev_fini(dev);
-	kfree(dev);
+	udl_usb_fini(dev);
 }
 
-static struct drm_driver driver = {
+static struct drm_driver udl_drm_driver = {
 	.driver_features = DRIVER_MODESET | DRIVER_GEM,
 
 	.release = udl_driver_release,
@@ -520,91 +468,88 @@ static struct drm_driver driver = {
 	DRM_GEM_SHMEM_DRIVER_OPS,
 };
 
-static struct udl_device *udl_driver_create(struct usb_interface *interface)
-{
-	struct usb_device *udev = interface_to_usbdev(interface);
-	struct udl_device *udl;
-	int ret;
-
-	udl = kzalloc(sizeof(*udl), GFP_KERNEL);
-	if (!udl)
-		return ERR_PTR(-ENOMEM);
-
-	ret = drm_dev_init(&udl->drm, &driver, &interface->dev);
-	if (ret)
-		goto err_free;
-
-	udl->udev = udev;
-	udl->drm.dev_private = udl;
-
-	ret = udl_modeset_init(udl);
-	if (ret)
-		goto err_dev;
-
-	drm_kms_helper_poll_init(&udl->drm);
-
-	ret = udl_usb_init(udl);
-	if (ret)
-		goto err_dev;
-
-	usb_set_intfdata(interface, udl);
-	return udl;
-
-err_dev:
-	drm_dev_fini(&udl->drm);
-err_free:
-	kfree(udl);
-	return ERR_PTR(ret);
-}
-
 static int udl_usb_probe(struct usb_interface *interface,
 			 const struct usb_device_id *id)
 {
-	int r;
 	struct udl_device *udl;
+	struct drm_device *drm;
+	int ret;
 
-	udl = udl_driver_create(interface);
-	if (IS_ERR(udl))
-		return PTR_ERR(udl);
+	udl = devm_kzalloc(&interface->dev, sizeof(*udl), GFP_KERNEL);
+	if (!udl)
+		return -ENOMEM;
 
-	r = drm_dev_register(&udl->drm, 0);
-	if (r)
-		goto err_free;
+	drm = &udl->drm;
+	udl->udev = interface_to_usbdev(interface);
+
+	ret = devm_drm_dev_init(&interface->dev, drm, &udl_drm_driver);
+	if (ret)
+		return ret;
+
+	drm_mode_config_init(drm);
+
+	drm->mode_config.min_width = 640;
+	drm->mode_config.min_height = 480;
+	drm->mode_config.max_width = 2048;
+	drm->mode_config.max_height = 2048;
+	drm->mode_config.prefer_shadow = 0;
+	drm->mode_config.preferred_depth = 32;
+
+	drm->mode_config.funcs = &udl_mode_funcs;
+
+	drm_connector_helper_add(&udl->conn, &udl_connector_helper_funcs);
+	ret = drm_connector_init(drm, &udl->conn, &udl_connector_funcs,
+				 DRM_MODE_CONNECTOR_DVII);
+	if (ret)
+		return ret;
+
+	ret = drm_simple_display_pipe_init(drm,
+					   &udl->pipe,
+					   &udl_pipe_funcs,
+					   udl_pipe_formats,
+					   ARRAY_SIZE(udl_pipe_formats),
+					   udl_pipe_modifiers,
+					   &udl->conn);
+	if (ret)
+		return ret;
+
+	drm_plane_enable_fb_damage_clips(&udl->pipe.plane);
+	drm_kms_helper_poll_init(drm);
+
+	ret = udl_usb_init(udl);
+	if (ret)
+		return ret;
+
+	usb_set_intfdata(interface, drm);
+
+	drm_mode_config_reset(drm);
+
+	ret = drm_dev_register(drm, 0);
+	if (ret)
+		return ret;
 
 	drm_fbdev_generic_setup(&udl->drm, 0);
 
-	DRM_INFO("Initialized udl on minor %d\n", udl->drm.primary->index);
-
 	return 0;
-
-err_free:
-	drm_dev_put(&udl->drm);
-	return r;
 }
 
 static void udl_usb_disconnect(struct usb_interface *interface)
 {
-	struct drm_device *dev = usb_get_intfdata(interface);
+	struct drm_device *drm = usb_get_intfdata(interface);
 
-	drm_kms_helper_poll_disable(dev);
-	udl_drop_usb(dev);
-	drm_dev_unplug(dev);
-	drm_dev_put(dev);
+	drm_dev_unregister(drm);
+	drm_atomic_helper_shutdown(drm);
 }
 
 static int udl_usb_suspend(struct usb_interface *interface,
 			   pm_message_t message)
 {
-	struct drm_device *dev = usb_get_intfdata(interface);
-
-	return drm_mode_config_helper_suspend(dev);
+	return drm_mode_config_helper_suspend(usb_get_intfdata(interface));
 }
 
 static int udl_usb_resume(struct usb_interface *interface)
 {
-	struct drm_device *dev = usb_get_intfdata(interface);
-
-	drm_mode_config_helper_resume(dev);
+	drm_mode_config_helper_resume(usb_get_intfdata(interface));
 
 	return 0;
 }
