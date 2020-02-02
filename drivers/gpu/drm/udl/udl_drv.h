@@ -67,11 +67,6 @@ struct udl_device {
 
 #define to_udl(x) container_of(x, struct udl_device, drm)
 
-/* modeset */
-int udl_modeset_init(struct udl_device *udl);
-void udl_modeset_cleanup(struct drm_device *dev);
-int udl_connector_init(struct udl_device *udl);
-
 struct urb *udl_get_urb(struct drm_device *dev);
 
 int udl_submit_urb(struct drm_device *dev, struct urb *urb, size_t len);
